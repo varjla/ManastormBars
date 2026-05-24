@@ -1,8 +1,0 @@
-## Interface: 30300
-## Title: ManastormBars
-## Notes: Custom action bar for Manastorm loadout slots (Ascension - Conquest of Azeroth)
-## Author: Varjla
-## Version: 0.0.0
-## SavedVariables: ManastormBarsDB
-
-ManastormBars.lua
