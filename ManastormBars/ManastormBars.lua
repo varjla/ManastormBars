@@ -20,6 +20,7 @@ local BUTTON_PADDING = 4
 local GRAB_WIDTH = 14
 local buttons = {}
 local buffTimer = 0
+local inManastorm = false
 
 -- IDs de Hechizos específicas para asegurar los Tooltips de Ascension
 local SPELL_IDS = {
@@ -89,7 +90,7 @@ local function GetButtonAction(i)
     local db = DB()
     if db.consumables then
         if i == 1 then
-            return "spell", "Manastorm: Interrupt Rod" -- Primero a la izquierda
+            return "spell", "Manastorm: Interrupt Rod"
         elseif i == 2 then
             return "item", "Endless Manastorm Potion"
         elseif i == 3 then
@@ -99,7 +100,7 @@ local function GetButtonAction(i)
         elseif i == 5 then
             return "spell", "Manastorm: Taunting Tonic"
         else
-            return "spell_slot", i - 5 -- Mantiene el bloque de 4 frascos a la derecha
+            return "spell_slot", i - 5
         end
     else
         return "spell_slot", i
@@ -110,10 +111,11 @@ local function UpdateGlobalBindingNames()
     BINDING_HEADER_MANASTORMBARS = "ManastormBars"
     for i = 1, MAX_SLOTS do
         local actionType, nameOrSlot = GetButtonAction(i)
+        local bindingName = "CLICK ManastormBarsButton" .. i .. ":LeftButton"
         if actionType == "item" or actionType == "spell" then
-            _G["BINDING_NAME_CLICK ManastormBarsButton" .. i .. ":LeftButton"] = nameOrSlot
+            _G["BINDING_NAME_" .. bindingName] = nameOrSlot
         else
-            _G["BINDING_NAME_CLICK ManastormBarsButton" .. i .. ":LeftButton"] = "Use Slot " .. nameOrSlot
+            _G["BINDING_NAME_" .. bindingName] = "Use Slot " .. nameOrSlot
         end
     end
 end
@@ -179,12 +181,6 @@ local function UpdateBuffDisplay()
                     else
                         btn.durationText:Hide()
                     end
-                else
-                    if btn.borderShown then
-                        btn.activeBorder:Hide()
-                        btn.borderShown = false
-                    end
-                    btn.durationText:Hide()
                 end
             else
                 if btn.borderShown then
@@ -279,6 +275,33 @@ local function UpdateDragHandleVisibility()
 end
 
 -- ------------------------------------------------------------
+-- Detección de Estado de Zona
+-- ------------------------------------------------------------
+local function CheckManastormStatus()
+    if ManastormObjectiveTrackerMainBlock and ManastormObjectiveTrackerMainBlock:IsVisible() then
+        return true
+    end
+    local zone = GetZoneText() or ""
+    if string.find(zone, "Manastorm") or GetLFGMode() == "LFG_STATUS_INSIDE" then
+        return true
+    end
+    return false
+end
+
+local function UpdateAddonVisibility()
+    if not ManastormBarsFrame then return end
+    inManastorm = CheckManastormStatus()
+    if inManastorm then
+        if not ManastormBarsFrame.isMinimized then
+            ManastormBarsFrame:Show()
+            UpdateButtonLayout()
+        end
+    else
+        ManastormBarsFrame:Hide()
+    end
+end
+
+-- ------------------------------------------------------------
 -- Button layout
 -- ------------------------------------------------------------
 local function UpdateButtonSpell(i)
@@ -353,7 +376,7 @@ local function UpdateButtonSpell(i)
     end
 end
 
-local function UpdateButtonLayout()
+function UpdateButtonLayout()
     local db = DB()
     local rows = db.rows
     local cols = db.cols
@@ -383,54 +406,57 @@ local function UpdateButtonLayout()
         end
     end
 
+    -- SI ESTÁ MINIMIZADO, NO CONTINUAMOS PARA NO VOLVER A HACER VISIBLES LOS BOTONES
+    if ManastormBarsFrame and ManastormBarsFrame.isMinimized then return end
+
     for i = 1, MAX_SLOTS do
         if i <= total then
-			if not buttons[i] then
-				local btn = CreateFrame("Button", "ManastormBarsButton" .. i, ManastormBarsFrame, "SecureActionButtonTemplate")
-				btn:RegisterForClicks("LeftButtonUp")
+            if not buttons[i] then
+                local btn = CreateFrame("Button", "ManastormBarsButton" .. i, ManastormBarsFrame, "SecureActionButtonTemplate")
+                btn:RegisterForClicks("LeftButtonUp")
 
-				local nt = btn:GetNormalTexture()
-				if nt then nt:SetTexture(nil) end
-				local pt = btn:GetPushedTexture()
-				if pt then pt:SetTexture(nil) end
-				btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+                local nt = btn:GetNormalTexture()
+                if nt then nt:SetTexture(nil) end
+                local pt = btn:GetPushedTexture()
+                if pt then pt:SetTexture(nil) end
+                btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
 
-				local iconTex = btn:CreateTexture(nil, "BACKGROUND")
-				iconTex:SetAllPoints(btn)
-				btn.iconTex = iconTex
+                local iconTex = btn:CreateTexture(nil, "BACKGROUND")
+                iconTex:SetAllPoints(btn)
+                btn.iconTex = iconTex
 
-				local cd = CreateFrame("Cooldown", "ManastormBarsButton" .. i .. "Cooldown", btn, "CooldownFrameTemplate")
-				cd:SetAllPoints(btn)
-				cd:SetDrawEdge(true)
-				cd:SetReverse(false)
-				btn.cooldown = cd
+                local cd = CreateFrame("Cooldown", "ManastormBarsButton" .. i .. "Cooldown", btn, "CooldownFrameTemplate")
+                cd:SetAllPoints(btn)
+                cd:SetDrawEdge(true)
+                cd:SetReverse(false)
+                btn.cooldown = cd
 
-				local activeBorder = btn:CreateTexture(nil, "OVERLAY")
-				activeBorder:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-				activeBorder:SetBlendMode("ADD")
-				activeBorder:SetVertexColor(0.2, 0.6, 1, 0.9)
-				activeBorder:SetPoint("TOPLEFT", btn, "TOPLEFT", -8, 8)
-				activeBorder:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 8, -8)
-				activeBorder:Hide()
-				btn.activeBorder = activeBorder
-				btn.borderShown = false
+                local activeBorder = btn:CreateTexture(nil, "OVERLAY")
+                activeBorder:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+                activeBorder:SetBlendMode("ADD")
+                activeBorder:SetVertexColor(0.2, 0.6, 1, 0.9)
+                activeBorder:SetPoint("TOPLEFT", btn, "TOPLEFT", -8, 8)
+                activeBorder:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 8, -8)
+                activeBorder:Hide()
+                btn.activeBorder = activeBorder
+                btn.borderShown = false
 
-				local durationText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-				durationText:SetPoint("TOP", btn, "TOP", 0, -2)
-				durationText:SetTextColor(0, 1, 0)
-				durationText:Hide()
-				btn.durationText = durationText
+                local durationText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                durationText:SetPoint("TOP", btn, "TOP", 0, -2)
+                durationText:SetTextColor(0, 1, 0)
+                durationText:Hide()
+                btn.durationText = durationText
 
-				local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 label:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -2, -2)
                 btn.label = label
 
-				local hotkey = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-				hotkey:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
-				hotkey:SetTextColor(0.9, 0.9, 0.9)
-				btn.hotkey = hotkey
+                local hotkey = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+                hotkey:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+                hotkey:SetTextColor(0.9, 0.9, 0.9)
+                btn.hotkey = hotkey
 
-				btn:SetScript("OnEnter", function(self)
+                btn:SetScript("OnEnter", function(self)
                     local actionType, nameOrSlot = GetButtonAction(self.slotIndex)
                     if actionType == "item" then
                         local itemID = GetItemIDByName(nameOrSlot)
@@ -447,7 +473,6 @@ local function UpdateButtonLayout()
                         GameTooltip:SetText(nameOrSlot, 1, 1, 1)
                         GameTooltip:Show()
                     elseif actionType == "spell" then
-                        -- CORRECCIÓN AGRESIVA: Buscamos ID interna o forzamos por base de datos local
                         local spellID = SPELL_IDS[nameOrSlot]
                         if not spellID then
                             _, _, _, _, _, _, spellID = GetSpellInfo(nameOrSlot)
@@ -460,7 +485,6 @@ local function UpdateButtonLayout()
                             return
                         end
                         
-                        -- Fallback si falla todo lo demás
                         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                         GameTooltip:SetText(nameOrSlot, 1, 1, 1)
                         GameTooltip:Show()
@@ -476,13 +500,13 @@ local function UpdateButtonLayout()
                         GameTooltip:SetText("Manastorm Slot " .. nameOrSlot, 1, 1, 1)
                         GameTooltip:Show()
                     end
-				end)
-				btn:SetScript("OnLeave", function()
-					GameTooltip:Hide()
-				end)
+                end)
+                btn:SetScript("OnLeave", function()
+                    GameTooltip:Hide()
+                end)
 
-				buttons[i] = btn
-			end
+                buttons[i] = btn
+            end
 
             local btn = buttons[i]
             btn.slotIndex = i
@@ -503,19 +527,19 @@ local function UpdateButtonLayout()
             UpdateButtonSpell(i)
 
             local actionType, nameOrSlot = GetButtonAction(i)
-			if actionType == "item" or actionType == "spell" then 
-				btn.label:SetText("")
-				btn:Show()
-			else
-				local spellID = GetSlotSpellID(nameOrSlot)
-				if spellID and spellID ~= 0 then
-					btn.label:SetText(nameOrSlot)
-					btn:Show()
-				else
-					btn.label:SetText("")
-					btn:Hide()
-				end
-			end
+            if actionType == "item" or actionType == "spell" then 
+                btn.label:SetText("")
+                btn:Show()
+            else
+                local spellID = GetSlotSpellID(nameOrSlot)
+                if spellID and spellID ~= 0 then
+                    btn.label:SetText(nameOrSlot)
+                    btn:Show()
+                else
+                    btn.label:SetText("")
+                    btn:Hide()
+                end
+            end
         else
             if buttons[i] then buttons[i]:Hide() end
         end
@@ -555,7 +579,6 @@ local function CreateMainFrame()
     dragHandle:SetPoint("TOPLEFT", f, "TOPLEFT", 2, -2)
     dragHandle:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 2, 2)
     dragHandle:EnableMouse(true)
-    dragHandle:RegisterForDrag("LeftButton")
     dragHandle:SetScript("OnDragStart", function()
         if not DB().locked then f:StartMoving() end
     end)
@@ -563,6 +586,29 @@ local function CreateMainFrame()
         f:StopMovingOrSizing()
         DB().posX = f:GetLeft()
         DB().posY = f:GetBottom()
+    end)
+
+    -- Botón invisible superpuesto para alternar minimizar/maximizar
+    local toggleBtn = CreateFrame("Button", "ManastormBarsToggleBtn", dragHandle)
+    toggleBtn:SetAllPoints(dragHandle)
+    toggleBtn:RegisterForClicks("LeftButtonUp")
+    
+    f.isMinimized = false
+    toggleBtn:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" then
+            f.isMinimized = not f.isMinimized
+            if f.isMinimized then
+                f.bg:Hide()
+                if ManastormBarsGearButton then ManastormBarsGearButton:Hide() end
+                for _, btn in ipairs(buttons) do
+                    if btn then btn:Hide() end
+                end
+            else
+                if not DB().hideBackground then f.bg:Show() end
+                if ManastormBarsGearButton then ManastormBarsGearButton:Show() end
+                UpdateButtonLayout()
+            end
+        end
     end)
 
     dragHandle.dots = {}
@@ -741,7 +787,24 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
         UpdateDragHandleVisibility()
         UpdateButtonLayout()
 
+        -- Verificación de estado inicial
+        UpdateAddonVisibility()
+
         self:SetScript("OnUpdate", function(self, elapsed)
+            -- Comprobación periódica de zona (Cada 2 segundos) para conmutar visibilidad autónomamente
+            if not self.statusCheckTimer then self.statusCheckTimer = 0 end
+            self.statusCheckTimer = self.statusCheckTimer + elapsed
+            if self.statusCheckTimer >= 2.0 then
+                self.statusCheckTimer = 0
+                local currentStatus = CheckManastormStatus()
+                if currentStatus ~= inManastorm then
+                    UpdateAddonVisibility()
+                end
+            end
+
+            -- Si no está en manastorm o está minimizado de forma manual, congelamos el hilo visual pesado
+            if not inManastorm or (ManastormBarsFrame and ManastormBarsFrame.isMinimized) then return end
+            
             buffTimer = buffTimer + elapsed
             if buffTimer >= 0.1 then
                 buffTimer = 0
@@ -810,6 +873,11 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
                 local result = ""
                 local numSlots = C_Manastorm.GetNumLoadoutSlots()
                 result = result .. "NumLoadoutSlots: " .. tostring(numSlots) .. "\n"
+                result = result .. "In Manastorm Zone: " .. tostring(inManastorm) .. "\n"
+                result = result .. "Tracker Block Found: " .. tostring(ManastormObjectiveTrackerMainBlock ~= nil) .. "\n"
+                if ManastormObjectiveTrackerMainBlock then
+                    result = result .. "Tracker Visible: " .. tostring(ManastormObjectiveTrackerMainBlock:IsVisible()) .. "\n"
+                end
                 for i = 1, (numSlots or 4) do
                     local spellID = C_Manastorm.GetLoadoutSpellAtIndex(i)
                     local name = spellID and GetSpellInfo(spellID) or "empty"
@@ -818,34 +886,20 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
                 error(result)
             else
                 print("|cffffff00ManastormBars commands:|r")
-                print("  /msb          - Open config window")
-                print("  /msb lock     - Toggle bar lock")
-                print("  /msb reset    - Reset to defaults")
-                print("  /msb debug    - Show slot info")
+                print("  /msb           - Open config window")
+                print("  /msb lock      - Toggle drag lock")
+                print("  /msb reset     - Restore default settings")
+                print("  /msb debug     - Print current loadout data")
             end
         end
-
-        print("|cffffff00ManastormBars|r loaded. Type |cffffd700/msb|r to configure.")
     end
 
-    if event == "SPELL_UPDATE_COOLDOWN" then
-        UpdateCooldowns()
-    end
-
-    if event == "PLAYER_REGEN_ENABLED" then
-        for i, btn in ipairs(buttons) do
-            if btn.pendingActionUpdate then
-                local update = btn.pendingActionUpdate
-                btn:SetAttribute("type", "spell")
-                btn:SetAttribute("spell", update.value)
-                btn.pendingActionUpdate = nil
-            end
-        end
-        UpdateKeybindingLabels()
-        UpdateButtonLayout()
-    elseif event == "UPDATE_BINDINGS" then
-        UpdateKeybindingLabels()
-    elseif event == "BAG_UPDATE" then
+    if event == "BAG_UPDATE" and addonLoaded then
         ScanBagsForConsumables()
+    end
+
+    if event == "PLAYER_REGEN_ENABLED" and addonLoaded then
+        UpdateGlobalBindingNames()
+        if inManastorm then UpdateButtonLayout() end
     end
 end)
