@@ -40,10 +40,11 @@ Puedes controlar el addon utilizando el comando principal `/msb` o `/manastormba
 ## 🚀 Instalación
 
 1. Descarga el repositorio como un archivo `.zip`.
-2. Descomprime el contenido dentro de la carpeta de Addons de tu cliente de Ascension:
-   `...\World of Warcraft\Interface\AddOns\`
-3. Asegúrate de que la carpeta contenedora se llame exactamente **`ManastormBars`** (y dentro de ella se encuentren los archivos `.toc` y `.lua`).
-4. Inicia el juego y asegúrate de tener activado el addon en la lista de personajes.
+2. Crea la carpeta ManastormBars
+3. Descomprime el contenido dentro de la carpeta recien creada en Addons de tu cliente de Ascension:
+   `...\World of Warcraft\Interface\AddOns\ManastormBars`
+4. Asegúrate de que la carpeta contenedora se llame exactamente **`ManastormBars`** (y dentro de ella se encuentren los archivos `.toc` y `.lua`).
+5. Inicia el juego y asegúrate de tener activado el addon en la lista de personajes.
 
 ---
 
