@@ -21,6 +21,7 @@ local GRAB_WIDTH = 14
 local buttons = {}
 local buffTimer = 0
 local inManastorm = false
+local manualOverride = nil -- nil means follow zone rules, true means force show, false means force hide
 
 -- IDs de Hechizos específicas para asegurar los Tooltips de Ascension
 local SPELL_IDS = {
@@ -31,6 +32,9 @@ local SPELL_IDS = {
 local function DB()
     return ManastormBarsDB or DEFAULTS
 end
+
+-- Forward declaration to prevent compilation order issues
+local UpdateButtonLayout
 
 -- ------------------------------------------------------------
 -- Helpers
@@ -109,13 +113,45 @@ end
 
 local function UpdateGlobalBindingNames()
     BINDING_HEADER_MANASTORMBARS = "ManastormBars"
+    
     for i = 1, MAX_SLOTS do
+        local bindingIdentifier = "MANASTORMBARS_BUTTON" .. i
         local actionType, nameOrSlot = GetButtonAction(i)
-        local bindingName = "CLICK ManastormBarsButton" .. i .. ":LeftButton"
+        
         if actionType == "item" or actionType == "spell" then
-            _G["BINDING_NAME_" .. bindingName] = nameOrSlot
+            _G["BINDING_NAME_" .. bindingIdentifier] = nameOrSlot
         else
-            _G["BINDING_NAME_" .. bindingName] = "Use Slot " .. nameOrSlot
+            _G["BINDING_NAME_" .. bindingIdentifier] = "Use Slot " .. nameOrSlot
+        end
+    end
+end
+
+local function UpdateKeybindingLabels()
+    for i, btn in ipairs(buttons) do
+        if btn:IsShown() then
+            local bindingIdentifier = "MANASTORMBARS_BUTTON" .. i
+            local key = GetBindingKey(bindingIdentifier)
+            
+            if key then
+                btn.hotkey:SetText(GetBindingText(key, "KEY_") or "")
+                btn.label:SetText(i)
+                btn.label:Show()
+                
+                if not InCombatLockdown() then
+                    SetOverrideBindingClick(btn, true, key, "ManastormBarsButton" .. i)
+                end
+            else
+                btn.hotkey:SetText("")
+                btn.label:SetText("")
+                btn.label:Hide()
+                
+                if not InCombatLockdown() then
+                    ClearOverrideBindings(btn)
+                end
+            end
+        else
+            btn.label:SetText("")
+            btn.label:Hide()
         end
     end
 end
@@ -193,25 +229,6 @@ local function UpdateBuffDisplay()
     end
 end
 
-local function UpdateKeybindingLabels()
-    for i, btn in ipairs(buttons) do
-        if btn:IsShown() then
-            local key = GetBindingKey("CLICK ManastormBarsButton" .. i .. ":LeftButton")
-            btn.hotkey:SetText(key and GetBindingText(key, "KEY_") or "")
-            if key then
-                btn.label:SetText(i)
-                btn.label:Show()
-            else
-                btn.label:SetText("")
-                btn.label:Hide()
-            end
-        else
-            btn.label:SetText("")
-            btn.label:Hide()
-        end
-    end
-end
-
 local function UpdateCooldowns()
     for i, btn in ipairs(buttons) do
         if btn:IsShown() then
@@ -253,7 +270,7 @@ end
 
 local function UpdateBackgroundVisibility()
     if ManastormBarsFrame and ManastormBarsFrame.bg then
-        if DB().hideBackground then
+        if DB().hideBackground or ManastormBarsFrame.isMinimized or (not inManastorm and manualOverride ~= true) then
             ManastormBarsFrame.bg:SetTexture(0, 0, 0, 0)
         else
             ManastormBarsFrame.bg:SetTexture(0, 0, 0, 0.5)
@@ -291,13 +308,27 @@ end
 local function UpdateAddonVisibility()
     if not ManastormBarsFrame then return end
     inManastorm = CheckManastormStatus()
-    if inManastorm then
-        if not ManastormBarsFrame.isMinimized then
-            ManastormBarsFrame:Show()
-            UpdateButtonLayout()
-        end
+    
+    -- Determine whether the bar should be showing its buttons right now
+    local shouldShowButtons = false
+    if manualOverride ~= nil then
+        shouldShowButtons = manualOverride
     else
-        ManastormBarsFrame:Hide()
+        shouldShowButtons = inManastorm and not ManastormBarsFrame.isMinimized
+    end
+
+    if shouldShowButtons then
+        if not DB().hideBackground then ManastormBarsFrame.bg:Show() end
+        if ManastormBarsGearButton then ManastormBarsGearButton:Show() end
+        UpdateButtonLayout()
+        UpdateBackgroundVisibility()
+    else
+        -- Cleanly collapse into minimized look (just the 3-dots handle)
+        ManastormBarsFrame.bg:Hide()
+        if ManastormBarsGearButton then ManastormBarsGearButton:Hide() end
+        for _, btn in ipairs(buttons) do
+            if btn then btn:Hide() end
+        end
     end
 end
 
@@ -406,8 +437,15 @@ function UpdateButtonLayout()
         end
     end
 
-    -- SI ESTÁ MINIMIZADO, NO CONTINUAMOS PARA NO VOLVER A HACER VISIBLES LOS BOTONES
-    if ManastormBarsFrame and ManastormBarsFrame.isMinimized then return end
+    -- Evaluate visibility setup before refreshing buttons
+    local currentlyShowingButtons = false
+    if manualOverride ~= nil then
+        currentlyShowingButtons = manualOverride
+    else
+        currentlyShowingButtons = inManastorm and not ManastormBarsFrame.isMinimized
+    end
+
+    if not currentlyShowingButtons then return end
 
     for i = 1, MAX_SLOTS do
         if i <= total then
@@ -574,41 +612,70 @@ local function CreateMainFrame()
     f.bg = bg
     UpdateBackgroundVisibility()
 
+    -- El Drag Handle (los 3 puntos)
     local dragHandle = CreateFrame("Frame", "ManastormBarsDragHandle", f)
     dragHandle:SetWidth(12)
     dragHandle:SetPoint("TOPLEFT", f, "TOPLEFT", 2, -2)
     dragHandle:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 2, 2)
     dragHandle:EnableMouse(true)
-    dragHandle:SetScript("OnDragStart", function()
+
+    -- El botón invisible encima de los puntos ahora se encarga de TODO para que no haya conflictos
+    local toggleBtn = CreateFrame("Button", "ManastormBarsToggleBtn", dragHandle)
+    toggleBtn:SetAllPoints(dragHandle)
+    toggleBtn:RegisterForClicks("RightButtonUp") -- Escucha clics comunes (Derecho)
+    toggleBtn:RegisterForDrag("LeftButton")       -- Escucha arrastres (Izquierdo)
+    
+    -- Manejo del Arrastre con Clic Izquierdo asignado al botón superior
+    toggleBtn:SetScript("OnDragStart", function()
         if not DB().locked then f:StartMoving() end
     end)
-    dragHandle:SetScript("OnDragStop", function()
+    toggleBtn:SetScript("OnDragStop", function()
         f:StopMovingOrSizing()
         DB().posX = f:GetLeft()
         DB().posY = f:GetBottom()
     end)
 
-    -- Botón invisible superpuesto para alternar minimizar/maximizar
-    local toggleBtn = CreateFrame("Button", "ManastormBarsToggleBtn", dragHandle)
-    toggleBtn:SetAllPoints(dragHandle)
-    toggleBtn:RegisterForClicks("LeftButtonUp")
-    
+    -- Manejo inteligente de la Minimización con Clic Derecho
     f.isMinimized = false
     toggleBtn:SetScript("OnClick", function(self, button)
-        if button == "LeftButton" then
-            f.isMinimized = not f.isMinimized
-            if f.isMinimized then
-                f.bg:Hide()
-                if ManastormBarsGearButton then ManastormBarsGearButton:Hide() end
-                for _, btn in ipairs(buttons) do
-                    if btn then btn:Hide() end
-                end
+        if button == "RightButton" then
+            if inManastorm then
+                -- Inside match: standard minimizing logic
+                f.isMinimized = not f.isMinimized
+                manualOverride = nil
             else
-                if not DB().hideBackground then f.bg:Show() end
-                if ManastormBarsGearButton then ManastormBarsGearButton:Show() end
-                UpdateButtonLayout()
+                -- Outside match: cycle override visibility rules
+                if manualOverride == true then
+                    manualOverride = false
+                    f.isMinimized = true
+                else
+                    manualOverride = true
+                    f.isMinimized = false
+                end
             end
+            UpdateAddonVisibility()
         end
+    end)
+
+    -- Tooltips explicativos al pasar el ratón por encima del botón interactivo
+    toggleBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine("Manastorm Bars Control", 1, 0.82, 0) 
+        GameTooltip:AddLine(" ") 
+        
+        if not DB().locked then
+            GameTooltip:AddDoubleLine("Left-Click + Drag:", "Move Action Bar", 1, 1, 1, 0.5, 1, 0.5)
+        else
+            GameTooltip:AddDoubleLine("Left-Click + Drag:", "Locked in Config", 1, 1, 1, 1, 0.3, 0.3)
+        end
+        
+        GameTooltip:AddDoubleLine("Right-Click:", "Show / Hide Buttons", 1, 1, 1, 0.5, 1, 0.5)
+        GameTooltip:Show()
+    end)
+    
+    toggleBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
     end)
 
     dragHandle.dots = {}
@@ -786,24 +853,33 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
         UpdateBackgroundVisibility()
         UpdateDragHandleVisibility()
         UpdateButtonLayout()
-
-        -- Verificación de estado inicial
         UpdateAddonVisibility()
 
         self:SetScript("OnUpdate", function(self, elapsed)
-            -- Comprobación periódica de zona (Cada 2 segundos) para conmutar visibilidad autónomamente
             if not self.statusCheckTimer then self.statusCheckTimer = 0 end
             self.statusCheckTimer = self.statusCheckTimer + elapsed
             if self.statusCheckTimer >= 2.0 then
                 self.statusCheckTimer = 0
                 local currentStatus = CheckManastormStatus()
                 if currentStatus ~= inManastorm then
+                    -- If we shifted zones, clear past manual override context to adapt correctly
+                    manualOverride = nil
+                    if not currentStatus then
+                        if ManastormBarsFrame then ManastormBarsFrame.isMinimized = false end
+                    end
                     UpdateAddonVisibility()
                 end
             end
 
-            -- Si no está en manastorm o está minimizado de forma manual, congelamos el hilo visual pesado
-            if not inManastorm or (ManastormBarsFrame and ManastormBarsFrame.isMinimized) then return end
+            -- Evaluate visibility status
+            local currentlyShowingButtons = false
+            if manualOverride ~= nil then
+                currentlyShowingButtons = manualOverride
+            else
+                currentlyShowingButtons = inManastorm and not ManastormBarsFrame.isMinimized
+            end
+
+            if not currentlyShowingButtons then return end
             
             buffTimer = buffTimer + elapsed
             if buffTimer >= 0.1 then
@@ -813,93 +889,25 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
 
                 local db = DB()
                 local total = db.rows * db.cols
-                local layoutChanged = false
                 for i = 1, total do
                     if buttons[i] then
                         UpdateButtonSpell(i)
-
-                        if not InCombatLockdown() then
-                            local actionType, nameOrSlot = GetButtonAction(i)
-                            if actionType == "item" or actionType == "spell" then
-                                if not buttons[i]:IsShown() then
-                                    buttons[i].label:SetText("")
-                                    buttons[i]:Show()
-                                    layoutChanged = true
-                                end
-                            else
-                                local spellID = GetSlotSpellID(nameOrSlot)
-                                if spellID and spellID ~= 0 then
-                                    if not buttons[i]:IsShown() then
-                                        buttons[i].label:SetText(nameOrSlot)
-                                        buttons[i]:Show()
-                                        layoutChanged = true
-                                    end
-                                else
-                                    if buttons[i]:IsShown() then
-                                        buttons[i].label:SetText("")
-                                        buttons[i]:Hide()
-                                        layoutChanged = true
-                                    end
-                                end
-                            end
-                        end
                     end
-                end
-                if layoutChanged and not InCombatLockdown() then
-                    UpdateButtonLayout()
                 end
             end
         end)
-
-        SLASH_MANASTORMBARS1 = "/msb"
-        SLASH_MANASTORMBARS2 = "/manastormbars"
-        SlashCmdList["MANASTORMBARS"] = function(msg)
-            local cmd = strtrim(msg):lower()
-            if cmd == "config" or cmd == "" then
-                ManastormBarsConfig_Toggle()
-            elseif cmd == "lock" then
-                DB().locked = not DB().locked
-                UpdateDragHandleVisibility()
-                print("|cffffff00ManastormBars:|r Bar " .. (DB().locked and "|cff00ff00locked|r" or "|cffff4444unlocked|r") .. ".")
-            elseif cmd == "reset" then
-                ManastormBarsDB = {}
-                for k, v in pairs(DEFAULTS) do ManastormBarsDB[k] = v end
-                ManastormBarsFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", DB().posX, DB().posY)
-                UpdateBackgroundVisibility()
-                UpdateDragHandleVisibility()
-                UpdateButtonLayout()
-                print("|cffffff00ManastormBars:|r Settings reset to defaults.")
-            elseif cmd == "debug" then
-                local result = ""
-                local numSlots = C_Manastorm.GetNumLoadoutSlots()
-                result = result .. "NumLoadoutSlots: " .. tostring(numSlots) .. "\n"
-                result = result .. "In Manastorm Zone: " .. tostring(inManastorm) .. "\n"
-                result = result .. "Tracker Block Found: " .. tostring(ManastormObjectiveTrackerMainBlock ~= nil) .. "\n"
-                if ManastormObjectiveTrackerMainBlock then
-                    result = result .. "Tracker Visible: " .. tostring(ManastormObjectiveTrackerMainBlock:IsVisible()) .. "\n"
-                end
-                for i = 1, (numSlots or 4) do
-                    local spellID = C_Manastorm.GetLoadoutSpellAtIndex(i)
-                    local name = spellID and GetSpellInfo(spellID) or "empty"
-                    result = result .. "Slot " .. i .. ": spellID=" .. tostring(spellID) .. " name=" .. tostring(name) .. "\n"
-                end
-                error(result)
-            else
-                print("|cffffff00ManastormBars commands:|r")
-                print("  /msb           - Open config window")
-                print("  /msb lock      - Toggle drag lock")
-                print("  /msb reset     - Restore default settings")
-                print("  /msb debug     - Print current loadout data")
-            end
-        end
     end
 
-    if event == "BAG_UPDATE" and addonLoaded then
+    if event == "UPDATE_BINDINGS" then
+        UpdateKeybindingLabels()
+    end
+
+    if event == "BAG_UPDATE" then
         ScanBagsForConsumables()
     end
 
-    if event == "PLAYER_REGEN_ENABLED" and addonLoaded then
-        UpdateGlobalBindingNames()
-        if inManastorm then UpdateButtonLayout() end
+    if event == "PLAYER_REGEN_ENABLED" then
+        UpdateKeybindingLabels()
+        UpdateButtonLayout()
     end
 end)
