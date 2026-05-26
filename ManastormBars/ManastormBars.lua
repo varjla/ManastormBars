@@ -189,8 +189,24 @@ local function FormatDuration(secs)
 end
 
 local function UpdateBuffDisplay()
+    -- Comprobamos si la barra debería estar visible globalmente
+    local barShouldBeVisible = false
+    if manualOverride ~= nil then
+        barShouldBeVisible = manualOverride
+    else
+        barShouldBeVisible = inManastorm and not (ManastormBarsFrame and ManastormBarsFrame.isMinimized)
+    end
+
     for i, btn in ipairs(buttons) do
-        if btn:IsShown() then
+        -- CORREGIDO: Si la barra completa se debe ocultar, limpiamos todo rastro de los botones inmediatamente
+        if not barShouldBeVisible then
+            if btn.borderShown then
+                btn.activeBorder:Hide()
+                btn.borderShown = false
+            end
+            btn.durationText:SetText("")
+            btn.durationText:Hide()
+        elseif btn:IsShown() then
             local actionType, nameOrSlot = GetButtonAction(i)
             local buffQuery = nil
             
@@ -218,7 +234,6 @@ local function UpdateBuffDisplay()
                     btn.durationText:Hide()
                 end
             else
-                -- CORREGIDO: Limpia y oculta completamente tanto el borde como el texto cuando el buff ya no existe
                 if btn.borderShown then
                     btn.activeBorder:Hide()
                     btn.borderShown = false
@@ -872,27 +887,27 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
                 end
             end
 
-            -- Evaluate visibility status
-            local currentlyShowingButtons = false
-            if manualOverride ~= nil then
-                currentlyShowingButtons = manualOverride
-            else
-                currentlyShowingButtons = inManastorm and not ManastormBarsFrame.isMinimized
-            end
-
-            if not currentlyShowingButtons then return end
-            
             buffTimer = buffTimer + elapsed
             if buffTimer >= 0.1 then
                 buffTimer = 0
                 UpdateBuffDisplay()
                 UpdateCooldowns()
 
-                local db = DB()
-                local total = db.rows * db.cols
-                for i = 1, total do
-                    if buttons[i] then
-                        UpdateButtonSpell(i)
+                -- Evaluate visibility status
+                local currentlyShowingButtons = false
+                if manualOverride ~= nil then
+                    currentlyShowingButtons = manualOverride
+                else
+                    currentlyShowingButtons = inManastorm and not ManastormBarsFrame.isMinimized
+                end
+
+                if currentlyShowingButtons then
+                    local db = DB()
+                    local total = db.rows * db.cols
+                    for i = 1, total do
+                        if buttons[i] then
+                            UpdateButtonSpell(i)
+                        end
                     end
                 end
             end
