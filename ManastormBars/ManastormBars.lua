@@ -203,26 +203,27 @@ local function UpdateBuffDisplay()
                 end
             end
 
-            if buffQuery then
-                local remaining = GetBuffRemaining(buffQuery)
-                if remaining then
-                    if not btn.borderShown then
-                        btn.activeBorder:Show()
-                        btn.borderShown = true
-                    end
-                    local durationStr = FormatDuration(remaining)
-                    if durationStr ~= "" then
-                        btn.durationText:SetText(durationStr)
-                        btn.durationText:Show()
-                    else
-                        btn.durationText:Hide()
-                    end
+            local remaining = buffQuery and GetBuffRemaining(buffQuery) or nil
+            if remaining then
+                if not btn.borderShown then
+                    btn.activeBorder:Show()
+                    btn.borderShown = true
+                end
+                local durationStr = FormatDuration(remaining)
+                if durationStr ~= "" then
+                    btn.durationText:SetText(durationStr)
+                    btn.durationText:Show()
+                else
+                    btn.durationText:SetText("")
+                    btn.durationText:Hide()
                 end
             else
+                -- CORREGIDO: Limpia y oculta completamente tanto el borde como el texto cuando el buff ya no existe
                 if btn.borderShown then
                     btn.activeBorder:Hide()
                     btn.borderShown = false
                 end
+                btn.durationText:SetText("")
                 btn.durationText:Hide()
             end
         end
